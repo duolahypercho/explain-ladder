@@ -1,0 +1,121 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Explainer</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{width:100vw;height:56.25vw;display:block}</style>
+</head><body><canvas id="c" width="1920" height="1080"></canvas>
+<script src="timeline.js"></script>
+<script>
+// ════════════════════════ CONFIG: edit these ════════════════════════
+const CFG={
+  topic:'WHAT IS X',            // small label top-left
+  credit:'',                    // optional end-card line, e.g. 'idea: @karpathy'
+  endTitle:'THE ONE-LINE TAKEAWAY.',
+  fps:30,
+};
+// ════════════════════════ engine (no need to edit) ════════════════════════
+const W=1920,H=1080,FPS=CFG.fps;
+const cv=document.getElementById('c'),X=cv.getContext('2d');
+const COL={bg:'#09090C',ink:'#F4F0E8',mute:'#6E6E7A',dim:'#2A2A33',acc:'#FF5A1F',yel:'#FFD23F',cyan:'#3EE0F0',grn:'#7CFFB2',pink:'#FF4FA0',red:'#FF3B3B',panel:'#121218'};
+const CODE='Menlo, Consolas, monospace',COND='"Avenir Next Condensed","Arial Narrow","Helvetica Neue",sans-serif',SANS='"Avenir Next","Helvetica Neue",Arial,sans-serif',SERIF='Palatino, Georgia, serif';
+const f=(s,w=600,fam=SANS)=>`${w} ${s}px ${fam}`;
+const cl=(x,a=0,b=1)=>x<a?a:x>b?b:x,L=(a,b,t)=>a+(b-a)*t,P=(t,a,b)=>cl((t-a)/(b-a));
+const eO3=t=>1-Math.pow(1-t,3),eO5=t=>1-Math.pow(1-t,5),eI3=t=>t*t*t,eIO3=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eOX=t=>t>=1?1:1-Math.pow(2,-10*t),eIX=t=>t<=0?0:Math.pow(2,10*t-10);
+const eIOX=t=>t<=0?0:t>=1?1:t<.5?Math.pow(2,20*t-10)/2:(2-Math.pow(2,-20*t+10))/2;
+const eOB=(t,s=1.9)=>1+(s+1)*Math.pow(t-1,3)+s*Math.pow(t-1,2);
+const spr=(t,k=15,d=7)=>t<=0?0:1-Math.exp(-d*t)*Math.cos(k*t);           // spring 0→1 (overshoots), t in seconds
+function rng(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const hsh=n=>{const s=Math.sin(n*127.1+311.7)*43758.5453;return s-Math.floor(s);};
+const vnoise=x=>{const i=Math.floor(x),fr=x-i,u=fr*fr*(3-2*fr);return L(hsh(i),hsh(i+1),u);};
+const fadeIn=(t,t0,d=.35)=>eO5(P(t,t0,t0+d));
+
+// ── timeline + cues ──  cue(id,'phrase') = the second that phrase is spoken (punctuation-weighted estimate)
+const SEG={};TL.forEach((s,i)=>{SEG[s.id]=s;s.i=i;});
+const DUR=TL[TL.length-1].end;
+const wt=ch=>/[.?!]/.test(ch)?9:ch===','?5:1;
+TL.forEach(s=>{s.cum=[0];for(const ch of s.text)s.cum.push(s.cum[s.cum.length-1]+wt(ch));});
+function cue(id,phrase){const s=SEG[id],i=s.text.indexOf(phrase);if(i<0)throw new Error(`cue("${id}","${phrase}") not in text`);return s.start+s.dur*(s.cum[i]/s.cum[s.text.length]);}
+const segEnd=id=>{const s=SEG[id],n=TL[s.i+1];return n?n.start-.45:DUR;};
+const SENT=[];TL.forEach(s=>{const re=/[^.?!]+[.?!]*\s*/g;let m;while((m=re.exec(s.text))){const a=m.index,b=a+m[0].trimEnd().length;if(b<=a)continue;
+  SENT.push({a:s.start+s.dur*s.cum[a]/s.cum[s.text.length],b:s.start+s.dur*s.cum[b]/s.cum[s.text.length],s:m[0].trim()});}});
+const BOUND=TL.slice(1).map(s=>s.start-.45);
+
+// ── drawing helpers ──
+function txt(c,s,x,y,font,color,align='left',base='alphabetic'){c.font=font;c.fillStyle=color;c.textAlign=align;c.textBaseline=base;c.fillText(s,x,y);}
+function rr(c,x,y,w,h,r){c.beginPath();c.roundRect(x,y,w,h,r);}
+// letters drop in one by one
+function slam(c,s,x,y,font,color,t0,t,stag=.03,dur=.24,rise=80,align='center'){
+  c.font=font;c.textAlign='left';c.textBaseline='alphabetic';const w=c.measureText(s).width,x0=align==='center'?x-w/2:x;
+  for(let i=0;i<s.length;i++){const p=P(t,t0+i*stag,t0+i*stag+dur);if(p<=0)continue;
+    const xi=x0+c.measureText(s.slice(0,i)).width,cw=c.measureText(s[i]).width,e=eOB(p,1.6),sc=L(1.6,1,eOX(p));
+    c.save();c.globalAlpha*=cl(p*3);c.translate(xi+cw/2,y+(1-e)*rise);c.scale(sc,sc);c.fillStyle=color;c.fillText(s[i],-cw/2,0);c.restore();}}
+// rubber stamp that lands with a thud
+function stamp(c,x,y,rot,label,t0,t,size=60,col=COL.acc){const p=P(t,t0,t0+.18);if(p<=0)return;c.save();c.translate(x,y);c.rotate(rot);const s=L(2.4,1,eOX(p));c.scale(s,s);c.globalAlpha=cl(p*4);
+  c.font=f(size,800,COND);const w=c.measureText(label).width+50;c.lineWidth=6;c.strokeStyle=col;rr(c,-w/2,-size*.65,w,size*1.3,8);c.stroke();txt(c,label,0,4,f(size,800,COND),col,'center','middle');c.restore();}
+// rounded box node that springs in
+function box(c,x,y,w,h,label,t0,t,{fill='#111117',stroke=COL.ink,color=COL.ink,size=44,sub=''}={}){if(t<t0)return;const s=spr(t-t0,16,7);c.save();c.translate(x,y);c.scale(s,s);
+  rr(c,-w/2,-h/2,w,h,16);c.fillStyle=fill;c.fill();c.lineWidth=3;c.strokeStyle=stroke;c.stroke();txt(c,label,0,sub?-6:4,f(size,800,COND),color,'center','middle');
+  if(sub)txt(c,sub,0,h/2-18,f(18,600,CODE),COL.mute,'center');c.restore();}
+function arrowHead(c,x,y,a,col,s=1){c.save();c.translate(x,y);c.rotate(a);c.scale(s,s);c.fillStyle=col;c.beginPath();c.moveTo(6,0);c.lineTo(-12,-9);c.lineTo(-12,9);c.closePath();c.fill();c.restore();}
+function bez(p0,p1,p2,p3,n=64){const a=[];for(let i=0;i<=n;i++){const u=i/n,v=1-u;a.push([v*v*v*p0[0]+3*v*v*u*p1[0]+3*v*u*u*p2[0]+u*u*u*p3[0],v*v*v*p0[1]+3*v*v*u*p1[1]+3*v*u*u*p2[1]+u*u*u*p3[1]]);}
+  const cum=[0];for(let i=1;i<a.length;i++)cum.push(cum[i-1]+Math.hypot(a[i][0]-a[i-1][0],a[i][1]-a[i-1][1]));return{a,cum,len:cum[cum.length-1]};}
+function ptAt(e,fr){const d=fr*e.len;let i=1;while(i<e.cum.length-1&&e.cum[i]<d)i++;const s=(d-e.cum[i-1])/((e.cum[i]-e.cum[i-1])||1);return[L(e.a[i-1][0],e.a[i][0],s),L(e.a[i-1][1],e.a[i][1],s),Math.atan2(e.a[i][1]-e.a[i-1][1],e.a[i][0]-e.a[i-1][0])];}
+// arrow that draws itself from a→b along a curve; flowing dots once drawn
+function flowArrow(c,e,t0,t,col=COL.cyan,dur=.4){const p=eIO3(P(t,t0,t0+dur));if(p<=0)return;c.strokeStyle=col;c.lineWidth=4;c.beginPath();c.moveTo(e.a[0][0],e.a[0][1]);
+  const d=p*e.len;for(let i=1;i<e.a.length;i++){if(e.cum[i]<=d)c.lineTo(e.a[i][0],e.a[i][1]);else{const q=ptAt(e,p);c.lineTo(q[0],q[1]);break;}}c.stroke();
+  if(p>=1){const q=ptAt(e,.999);arrowHead(c,q[0],q[1],q[2],col,1.2);for(let k=0;k<3;k++){const z=ptAt(e,((t-t0)*.6+k/3)%1);c.fillStyle=col;c.beginPath();c.arc(z[0],z[1],6,0,7);c.fill();}}}
+function person(c,x,y,s,col){c.save();c.translate(x,y);c.scale(s,s);c.fillStyle=col;c.beginPath();c.arc(0,-62,24,0,7);c.fill();rr(c,-38,-30,76,82,[38,38,10,10]);c.fill();c.restore();}
+// bullet list where item i appears at times[i]
+function bullets(c,items,times,x,y,t,{size=48,gap=88,col=COL.ink}={}){items.forEach((s,i)=>{const p=fadeIn(t,times[i]);if(p<=0)return;c.save();c.globalAlpha=p;c.translate((1-p)*60,0);
+  c.fillStyle=COL.acc;c.fillRect(x,y+i*gap-size*.42,14,14);txt(c,s,x+40,y+i*gap,f(size,700,SANS),col);c.restore();});}
+// big count-up number
+function counter(c,x,y,from,to,t0,t1,t,{size=160,suffix='',col=COL.acc,dec=0}={}){const v=L(from,to,eO3(P(t,t0,t1)));if(t<t0)return;txt(c,v.toFixed(dec)+suffix,x,y,f(size,800,COND),col,'center');}
+function stepTitle(c,t,t0,kicker,title){if(t<t0)return;txt(c,kicker,120,175,f(24,700,CODE),COL.acc);slam(c,title,120,262,f(92,800,COND),COL.ink,t0,t,.02,.22,60,'left');}
+function bg(c,grid=true){c.fillStyle=COL.bg;c.fillRect(0,0,W,H);if(grid){c.fillStyle='#1b1b23';for(let x=0;x<=W;x+=48)for(let y=0;y<=H;y+=48)c.fillRect(x-1,y-1,2,2);}}
+
+// ════════════════════════ SCENES: one function per script.json id ════════════════════════
+// Each gets (c, t) with absolute time t. Use cue(id,'words') so visuals land on the spoken words.
+// Content zone: y 140..880. Captions own y 900..1020.
+const SCENES={
+  // example: replace with your own, keyed by script.json ids
+  intro(c,t){const s=SEG.intro;bg(c,false);
+    txt(c,'EXPLAINED SIMPLY',W/2,360,f(24,700,CODE),COL.acc,'center');
+    slam(c,CFG.topic,W/2,520,f(150,800,COND),COL.ink,s.start,t,.03,.26);},
+};
+// fallback for ids without a scene: big kicker + the segment's first sentence
+function fallback(c,t,s){bg(c);stepTitle(c,t,s.start,String(s.i+1).padStart(2,'0'),s.id.toUpperCase());}
+
+// ════════════════════════ overlays (captions, transitions, hud, end card) ════════════════════════
+function captions(c,t){const S=SENT.find(s=>t>=s.a-.15&&t<=s.b+.5);if(!S||t>TL[TL.length-1].start+TL[TL.length-1].dur+.3)return;
+  const al=cl((t-(S.a-.15))/.15)*cl((S.b+.5-t)/.2);c.font=f(40,600,SANS);const words=S.s.split(' '),lines=[[]];let lw=0;
+  words.forEach(w=>{const ww=c.measureText(w+' ').width;if(lw+ww>1400){lines.push([]);lw=0;}lines[lines.length-1].push(w);lw+=ww;});
+  const g=c.createLinearGradient(0,880,0,1080);g.addColorStop(0,'rgba(9,9,12,0)');g.addColorStop(.4,'rgba(9,9,12,.85)');c.globalAlpha=al;c.fillStyle=g;c.fillRect(0,880,W,200);
+  const pr=P(t,S.a,S.b),total=S.s.length;let ci=0;
+  lines.forEach((ln,li)=>{const s=ln.join(' '),w=c.measureText(s).width;let x=W/2-w/2;const y=lines.length===1?985:955+li*52;
+    ln.forEach(wd=>{const on=ci/total<=pr+.02;c.globalAlpha=al*(on?1:.32);txt(c,wd,x,y,f(40,600,SANS),COL.ink);x+=c.measureText(wd+' ').width;ci+=wd.length+1;});});c.globalAlpha=1;}
+const TCOL=[COL.acc,COL.yel,COL.cyan,COL.ink,COL.pink];
+function transitions(c,t){BOUND.forEach((b,k)=>{const u=t-b;if(u<-.32||u>.34)return;const sk=360,xr=L(-sk-10,W+10,eIOX(P(u,-.32,-.02))),xl=L(-sk-10,W+10,eIOX(P(u,.04,.34)));
+  c.save();c.beginPath();c.moveTo(xl+sk,0);c.lineTo(xr+sk,0);c.lineTo(xr,H);c.lineTo(xl,H);c.closePath();c.clip();c.fillStyle=TCOL[k%TCOL.length];c.fillRect(0,0,W,H);
+  const lab=TL[k+1].label;if(lab)txt(c,lab,W/2,600,f(200,800,COND),COL.bg,'center');c.restore();});}
+function hud(c,t){c.fillStyle=COL.acc;c.fillRect(70,62,10,10);txt(c,CFG.topic,90,73,f(16,700,CODE),COL.ink);
+  c.fillStyle='#22222a';c.fillRect(0,H-6,W,6);c.fillStyle=COL.acc;c.fillRect(0,H-6,W*t/DUR,6);}
+function endCard(c,t){const t0=TL[TL.length-1].start+TL[TL.length-1].dur+.3;if(t<t0)return;
+  const p=eO5(P(t,t0,t0+.3));c.globalAlpha=p;c.fillStyle=COL.bg;c.fillRect(0,0,W,H);c.globalAlpha=1;
+  slam(c,CFG.endTitle,W/2,520,f(150,800,COND),COL.ink,t0,t,.025,.24);
+  if(CFG.credit){c.globalAlpha=fadeIn(t,t0+.6);txt(c,CFG.credit,W/2,640,f(28,600,CODE),COL.acc,'center');c.globalAlpha=1;}}
+
+// ════════════════════════ frame ════════════════════════
+const grains=[];for(let g=0;g<6;g++){const n=document.createElement('canvas');n.width=n.height=256;const nc=n.getContext('2d'),im=nc.createImageData(256,256),r=rng(g*99+7);
+  for(let i=0;i<im.data.length;i+=4){const v=r()*255;im.data[i]=im.data[i+1]=im.data[i+2]=v;im.data[i+3]=255;}nc.putImageData(im,0,0);grains.push(n);}
+const vig=document.createElement('canvas');vig.width=W;vig.height=H;{const v=vig.getContext('2d'),g=v.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*1.05);g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.7)');v.fillStyle=g;v.fillRect(0,0,W,H);}
+function render(t){const c=X;c.setTransform(1,0,0,1,0,0);c.globalAlpha=1;
+  let k=0;for(let i=0;i<BOUND.length;i++)if(t>=BOUND[i])k=i+1;const s=TL[k];
+  (SCENES[s.id]||((c,t)=>fallback(c,t,s)))(c,t);c.globalAlpha=1;c.setLineDash([]);c.lineCap='butt';
+  captions(c,t);transitions(c,t);hud(c,t);endCard(c,t);
+  c.globalAlpha=.05;c.fillStyle=c.createPattern(grains[Math.floor(t*FPS)%6],'repeat');c.save();c.translate(Math.floor(hsh(t)*256),Math.floor(hsh(t+1)*256));c.fillRect(-256,-256,W+512,H+512);c.restore();
+  c.globalAlpha=1;c.drawImage(vig,0,0);
+  const k2=Math.max(1-P(t,0,.6),eI3(P(t,DUR-.8,DUR)));if(k2>0){c.fillStyle=`rgba(0,0,0,${k2})`;c.fillRect(0,0,W,H);}}
+window.DUR=DUR;
+window.ready=(async()=>{await Promise.all(['800 80px "Avenir Next Condensed"','500 20px "Avenir Next"','700 20px "Avenir Next"','700 20px Menlo'].map(s=>document.fonts.load(s).catch(()=>{})));return true;})();
+window.renderFrame=t=>render(t);
+if(!location.search.includes('render')){window.ready.then(()=>{const t0=performance.now();const loop=()=>{render(((performance.now()-t0)/1000)%DUR);requestAnimationFrame(loop);};loop();});}
+</script></body></html>
